@@ -1,5 +1,6 @@
 use chrono::{Duration, NaiveDateTime};
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum InputFormat {
     Unix,
     Epoc(NaiveDateTime),
@@ -20,6 +21,7 @@ fn parse_decimal(s: &str) -> Option<(i64, u32)> {
     })
 }
 
+/// Parses string to datetime according to given format.
 pub fn parse_string(s: &str, format: InputFormat) -> Option<NaiveDateTime> {
     Some(match format {
         InputFormat::Unix => {
@@ -32,6 +34,35 @@ pub fn parse_string(s: &str, format: InputFormat) -> Option<NaiveDateTime> {
         }
         InputFormat::Custom(fmt) => NaiveDateTime::parse_from_str(s, &fmt).ok()?,
     })
+}
+
+/// Parses line to timestamp and remainder.
+///
+/// Assumes the timestamp is in the beginning of the line, does not contain whitespace (space or
+/// tab), and is followed by whitespace. This whitespace is included in the remainder.
+///
+/// If timestamp cannot be parsed, returns None as timestamp and the whole line as the remainder.
+pub fn parse_line(s: &str, format: InputFormat) -> (Option<NaiveDateTime>, &str) {
+    match s.find(&[' ', '\t']) {
+        Some(i) => match parse_string(&s[..i], format) {
+            Some(timestamp) => (Some(timestamp), &s[i..]),
+            None => (None, s),
+        },
+        None => (None, s),
+    }
+}
+
+/// Tries to automatically detect the timestamp format used.
+///
+/// Assumes the timestamp is in the beginning of the line, does not contain whitespace (space or
+/// tab), and is followed by whitespace.
+pub fn detect_format(s: &str) -> Option<InputFormat> {
+    let ts = &s[..s.find(&[' ', '\t'])?];
+
+    if parse_decimal(ts).is_some() {
+        return Some(InputFormat::Unix);
+    }
+    None
 }
 
 #[cfg(test)]
@@ -116,5 +147,52 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn test_parse_line() {
+        // Space separator
+        assert_eq!(
+            parse_line("123.4 Log message", InputFormat::Unix),
+            (
+                Some(NaiveDateTime::from_timestamp(123, 400_000_000)),
+                " Log message"
+            )
+        );
+        // Tab separator
+        assert_eq!(
+            parse_line("123.4\tLog message", InputFormat::Unix),
+            (
+                Some(NaiveDateTime::from_timestamp(123, 400_000_000)),
+                "\tLog message"
+            )
+        );
+        // No timestamp, message contains separator.
+        assert_eq!(
+            parse_line("Log message", InputFormat::Unix),
+            (None, "Log message")
+        );
+        // No whitespace
+        assert_eq!(
+            parse_line("Logmessage", InputFormat::Unix),
+            (None, "Logmessage")
+        );
+        // Start with space
+        assert_eq!(
+            parse_line(" Logmessage", InputFormat::Unix),
+            (None, " Logmessage")
+        );
+        // Empty
+        assert_eq!(parse_line("", InputFormat::Unix), (None, ""));
+    }
+
+    #[test]
+    fn test_detect_format() {
+        assert_eq!(detect_format("123.4 Log message"), Some(InputFormat::Unix));
+        assert_eq!(detect_format("Log message"), None);
+        assert_eq!(detect_format("Logmessage"), None);
+        assert_eq!(detect_format(" Logmessage"), None);
+        assert_eq!(detect_format(" "), None);
+        assert_eq!(detect_format(""), None);
     }
 }
