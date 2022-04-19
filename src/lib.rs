@@ -3,8 +3,9 @@ use chrono::{Duration, NaiveDateTime};
 #[derive(Debug, PartialEq, Eq)]
 pub enum InputFormat {
     Unix,
-    Epoc(NaiveDateTime),
     /// E.g. "%Y-%m-%d %H:%M". Date, hour and minute fields are mandatory.
+    Epoc(NaiveDateTime),
+    Iso8601,
     Custom(String),
 }
 
@@ -32,6 +33,7 @@ pub fn parse_string(s: &str, format: InputFormat) -> Option<NaiveDateTime> {
             let (sec, nsec) = parse_decimal(s)?;
             epoc + Duration::seconds(sec) + Duration::nanoseconds(nsec.into())
         }
+        InputFormat::Iso8601 => NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f").ok()?,
         InputFormat::Custom(fmt) => NaiveDateTime::parse_from_str(s, &fmt).ok()?,
     })
 }
@@ -58,6 +60,10 @@ pub fn parse_line(s: &str, format: InputFormat) -> (Option<NaiveDateTime>, &str)
 /// tab), and is followed by whitespace.
 pub fn detect_format(s: &str) -> Option<InputFormat> {
     let ts = &s[..s.find(&[' ', '\t'])?];
+
+    if NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H:%M:%S%.f").is_ok() {
+        return Some(InputFormat::Iso8601);
+    }
 
     if parse_decimal(ts).is_some() {
         return Some(InputFormat::Unix);
@@ -150,6 +156,39 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_string_iso8601() {
+        // With milliseconds
+        assert_eq!(
+            parse_string("2001-02-13T12:34:56.123", InputFormat::Iso8601),
+            Some(NaiveDateTime::new(
+                NaiveDate::from_ymd(2001, 2, 13),
+                NaiveTime::from_hms_milli(12, 34, 56, 123)
+            ))
+        );
+        // With nanoseconds
+        assert_eq!(
+            parse_string("2001-02-13T12:34:56.123456789", InputFormat::Iso8601),
+            Some(NaiveDateTime::new(
+                NaiveDate::from_ymd(2001, 2, 13),
+                NaiveTime::from_hms_nano(12, 34, 56, 123456789)
+            ))
+        );
+        // No fractional seconds
+        assert_eq!(
+            parse_string("2001-02-13T12:34:56", InputFormat::Iso8601),
+            Some(NaiveDateTime::new(
+                NaiveDate::from_ymd(2001, 2, 13),
+                NaiveTime::from_hms(12, 34, 56)
+            ))
+        );
+        // Space as date-time separator.
+        assert_eq!(
+            parse_string("2001-02-13 12:34:56", InputFormat::Iso8601),
+            None
+        );
+    }
+
+    #[test]
     fn test_parse_line() {
         // Space separator
         assert_eq!(
@@ -189,6 +228,8 @@ mod tests {
     #[test]
     fn test_detect_format() {
         assert_eq!(detect_format("123.4 Log message"), Some(InputFormat::Unix));
+        assert_eq!(detect_format("2001-12-13T12:34:56 Log message"), Some(InputFormat::Iso8601));
+        assert_eq!(detect_format("2001-12-13T12:34:56.123 Log message"), Some(InputFormat::Iso8601));
         assert_eq!(detect_format("Log message"), None);
         assert_eq!(detect_format("Logmessage"), None);
         assert_eq!(detect_format(" Logmessage"), None);
