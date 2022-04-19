@@ -2,7 +2,10 @@ use chrono::{Duration, NaiveDateTime};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum InputFormat {
+    /// Seconds since midnight 1970-01-01
     Unix,
+    /// Milliseconds since midnight 1970-01-01
+    UnixMs,
     /// E.g. "%Y-%m-%d %H:%M". Date, hour and minute fields are mandatory.
     Epoc(NaiveDateTime),
     Iso8601,
@@ -28,6 +31,13 @@ pub fn parse_string(s: &str, format: InputFormat) -> Option<NaiveDateTime> {
         InputFormat::Unix => {
             let (sec, nsec) = parse_decimal(s)?;
             NaiveDateTime::from_timestamp(sec, nsec)
+        }
+        InputFormat::UnixMs => {
+            let (msec, psec) = parse_decimal(s)?;
+            NaiveDateTime::from_timestamp(
+                msec / 1000,
+                (msec % 1000) as u32 * 1_000_000 + psec / 1000,
+            )
         }
         InputFormat::Epoc(epoc) => {
             let (sec, nsec) = parse_decimal(s)?;
@@ -65,8 +75,10 @@ pub fn detect_format(s: &str) -> Option<InputFormat> {
         return Some(InputFormat::Iso8601);
     }
 
-    if parse_decimal(ts).is_some() {
-        return Some(InputFormat::Unix);
+    match parse_decimal(ts) {
+        Some((x, _)) if x > 1_000_000_000_000 => return Some(InputFormat::UnixMs),
+        Some(_) => return Some(InputFormat::Unix),
+        None => (),
     }
     None
 }
@@ -98,6 +110,19 @@ mod tests {
             Some(NaiveDateTime::from_timestamp(1000, 123456))
         );
         assert_eq!(parse_string("abc", InputFormat::Unix), None);
+    }
+
+    #[test]
+    fn test_parse_string_unixms() {
+        assert_eq!(
+            parse_string("1234", InputFormat::UnixMs),
+            Some(NaiveDateTime::from_timestamp(1, 234_000_000))
+        );
+        assert_eq!(
+            parse_string("1000.000123456", InputFormat::UnixMs),
+            Some(NaiveDateTime::from_timestamp(1, 123))
+        );
+        assert_eq!(parse_string("abc", InputFormat::UnixMs), None);
     }
 
     #[test]
@@ -227,9 +252,22 @@ mod tests {
 
     #[test]
     fn test_detect_format() {
-        assert_eq!(detect_format("123.4 Log message"), Some(InputFormat::Unix));
-        assert_eq!(detect_format("2001-12-13T12:34:56 Log message"), Some(InputFormat::Iso8601));
-        assert_eq!(detect_format("2001-12-13T12:34:56.123 Log message"), Some(InputFormat::Iso8601));
+        assert_eq!(
+            detect_format("1650400500.123 Log message"),
+            Some(InputFormat::Unix)
+        );
+        assert_eq!(
+            detect_format("1650400500123.456 Log message"),
+            Some(InputFormat::UnixMs)
+        );
+        assert_eq!(
+            detect_format("2001-12-13T12:34:56 Log message"),
+            Some(InputFormat::Iso8601)
+        );
+        assert_eq!(
+            detect_format("2001-12-13T12:34:56.123 Log message"),
+            Some(InputFormat::Iso8601)
+        );
         assert_eq!(detect_format("Log message"), None);
         assert_eq!(detect_format("Logmessage"), None);
         assert_eq!(detect_format(" Logmessage"), None);
