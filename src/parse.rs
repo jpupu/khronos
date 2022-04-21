@@ -75,8 +75,10 @@ pub fn detect_format(s: &str) -> Option<InputFormat> {
         return Some(InputFormat::Iso8601);
     }
 
+    // 100 billion is 1973-03-03 in if interpreted as milliseconds, 5138-11-16 if interpreted in
+    // seconds. So it's reasonable to assume any bigger timestamps are in milliseconds.
     match parse_decimal(ts) {
-        Some((x, _)) if x > 1_000_000_000_000 => return Some(InputFormat::UnixMs),
+        Some((x, _)) if x > 100_000_000_000 => return Some(InputFormat::UnixMs),
         Some(_) => return Some(InputFormat::Unix),
         None => (),
     }
@@ -253,8 +255,16 @@ mod tests {
     #[test]
     fn test_detect_format() {
         assert_eq!(
+            detect_format("982240496.123 Log message"),
+            Some(InputFormat::Unix)
+        );
+        assert_eq!(
             detect_format("1650400500.123 Log message"),
             Some(InputFormat::Unix)
+        );
+        assert_eq!(
+            detect_format("982240496123.456 Log message"),
+            Some(InputFormat::UnixMs)
         );
         assert_eq!(
             detect_format("1650400500123.456 Log message"),
