@@ -1,7 +1,7 @@
 use chrono::{Duration, NaiveDateTime};
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum InputFormat {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputFormat<'a> {
     /// Seconds since midnight 1970-01-01
     Unix,
     /// Milliseconds since midnight 1970-01-01
@@ -9,7 +9,7 @@ pub enum InputFormat {
     /// E.g. "%Y-%m-%d %H:%M". Date, hour and minute fields are mandatory.
     Epoc(NaiveDateTime),
     Iso8601,
-    Custom(String),
+    Custom(&'a str),
 }
 
 /// Parses a decimal number into integer and nano parts.
@@ -54,7 +54,7 @@ pub fn parse_string(s: &str, format: InputFormat) -> Option<NaiveDateTime> {
 /// tab), and is followed by whitespace. This whitespace is included in the remainder.
 ///
 /// If timestamp cannot be parsed, returns None as timestamp and the whole line as the remainder.
-pub fn parse_line(s: &str, format: InputFormat) -> (Option<NaiveDateTime>, &str) {
+pub fn parse_line<'a>(s: &'a str, format: InputFormat) -> (Option<NaiveDateTime>, &'a str) {
     match s.find(&[' ', '\t']) {
         Some(i) => match parse_string(&s[..i], format) {
             Some(timestamp) => (Some(timestamp), &s[i..]),
@@ -147,10 +147,7 @@ mod tests {
     #[test]
     fn test_parse_string_custom() {
         assert_eq!(
-            parse_string(
-                "2001-02-13 12:34",
-                InputFormat::Custom("%Y-%m-%d %H:%M".to_string())
-            ),
+            parse_string("2001-02-13 12:34", InputFormat::Custom("%Y-%m-%d %H:%M")),
             Some(NaiveDateTime::new(
                 NaiveDate::from_ymd(2001, 2, 13),
                 NaiveTime::from_hms(12, 34, 0)
@@ -159,7 +156,7 @@ mod tests {
         assert_eq!(
             parse_string(
                 "2001-02-13 12:34:56.123456",
-                InputFormat::Custom("%Y-%m-%d %H:%M:%S%.f".to_string())
+                InputFormat::Custom("%Y-%m-%d %H:%M:%S%.f")
             ),
             Some(NaiveDateTime::new(
                 NaiveDate::from_ymd(2001, 2, 13),
@@ -167,17 +164,11 @@ mod tests {
             ))
         );
         assert_eq!(
-            parse_string(
-                "2001x02x13 12x34",
-                InputFormat::Custom("%Y-%m-%d %H:%M".to_string())
-            ),
+            parse_string("2001x02x13 12x34", InputFormat::Custom("%Y-%m-%d %H:%M")),
             None
         );
         assert_eq!(
-            parse_string(
-                "2001x02x13",
-                InputFormat::Custom("%Y-%m-%d %H:%M".to_string())
-            ),
+            parse_string("2001x02x13", InputFormat::Custom("%Y-%m-%d %H:%M")),
             None
         );
     }
