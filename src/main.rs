@@ -67,22 +67,34 @@ fn parse_output_format(s: &str) -> Result<OutputFormat, String> {
     }
 }
 
-fn process_text<R, F>(informat: Option<InputFormat>, outformat: OutputFormat, input: R, mut func: F)
-where
+fn process_text<R, F>(
+    mut informat: Option<InputFormat>,
+    outformat: OutputFormat,
+    input: R,
+    mut func: F,
+) where
     R: BufRead,
     F: FnMut(&str, &str),
 {
-    let informat = informat.expect("auto detect not implemented");
     let mut prev_intime = None;
     for line in input.lines().map(|x| x.expect("line error")) {
-        let (intime, text) = khronos::parse_line(&line, &informat);
-        let outtime = match intime {
-            Some(t) => khronos::write(outformat, t, prev_intime),
-            None => "".to_string(),
-        };
-        prev_intime = intime;
+        // Try to auto-detect input format if it's not known.
+        if informat.is_none() {
+            informat = khronos::detect_format(&line);
+        }
 
-        func(&outtime, text);
+        // Process line.
+        if let Some(ref fmt) = informat {
+            let (intime, text) = khronos::parse_line(&line, fmt);
+            let outtime = match intime {
+                Some(t) => khronos::write(outformat, t, prev_intime),
+                None => "".to_string(),
+            };
+            prev_intime = intime;
+            func(&outtime, text);
+        } else {
+            func("", &line);
+        }
     }
 }
 
@@ -140,6 +152,34 @@ mod tests {
                 ("1970-01-01T00:00:00", " a line"),
                 ("", "another line"),
                 ("", ""),
+            ],
+        );
+    }
+
+    #[test]
+    fn auto_detect_input_format_from_first_line() {
+        check_process_text(
+            None,
+            OutputFormat::Iso8601,
+            "000.0 a line\n60.66 another line\n",
+            vec![
+                ("1970-01-01T00:00:00", " a line"),
+                ("1970-01-01T00:01:00", " another line"),
+            ],
+        );
+    }
+
+    #[test]
+    fn auto_detect_input_format_from_second_line() {
+        check_process_text(
+            None,
+            OutputFormat::Iso8601,
+            "notime\nstillno\n000.0 a line\n60.66 another line\n",
+            vec![
+                ("", "notime"),
+                ("", "stillno"),
+                ("1970-01-01T00:00:00", " a line"),
+                ("1970-01-01T00:01:00", " another line"),
             ],
         );
     }
