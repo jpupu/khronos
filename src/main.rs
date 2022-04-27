@@ -1,5 +1,47 @@
-use khronos::{self, InputFormat, OutputFormat};
+use clap::Parser;
+use khronos::{self, InputFormat, OutputFormat, Unit};
 use std::io::{self, BufRead};
+
+#[derive(Parser, Debug)]
+struct Args {
+    #[clap(parse(try_from_str=parse_output_format))]
+    outformat: OutputFormat,
+}
+
+fn parse_output_format(s: &str) -> Result<OutputFormat, String> {
+    let args = s.split(',').collect::<Vec<&str>>();
+    let (fmt, args) = args.split_first().unwrap();
+    match *fmt {
+        "iso" => Ok(OutputFormat::Iso8601),
+        "unix" => {
+            let mut unit = Unit::Seconds;
+            for a in args {
+                match *a {
+                    "s" => unit = Unit::Seconds,
+                    "ms" => unit = Unit::Milliseconds,
+                    "us" => unit = Unit::Microseconds,
+                    "ns" => unit = Unit::Nanoseconds,
+                    _ => return Err(format!("Invalid format argument {:?}", a)),
+                };
+            }
+            Ok(OutputFormat::Unix(unit))
+        }
+        "delta" => {
+            let mut unit = Unit::Seconds;
+            for a in args {
+                match *a {
+                    "s" => unit = Unit::Seconds,
+                    "ms" => unit = Unit::Milliseconds,
+                    "us" => unit = Unit::Microseconds,
+                    "ns" => unit = Unit::Nanoseconds,
+                    _ => return Err(format!("Invalid format argument {:?}", a)),
+                };
+            }
+            Ok(OutputFormat::Delta(unit))
+        }
+        _ => Err("Invalid output format".to_string()),
+    }
+}
 
 fn process_text<R, F>(informat: InputFormat, outformat: OutputFormat, input: R, mut func: F)
 where
@@ -20,12 +62,15 @@ where
 }
 
 fn main() {
+    let args = Args::parse();
     let informat = InputFormat::Unix;
-    let outformat = OutputFormat::Iso8601;
 
-    process_text(informat, outformat, io::stdin().lock(), |time, text| {
-        println!("{}{}", time, text)
-    });
+    process_text(
+        informat,
+        args.outformat,
+        io::stdin().lock(),
+        |time, text| println!("{}{}", time, text),
+    );
 }
 
 #[cfg(test)]
@@ -72,6 +117,49 @@ mod tests {
                 ("", "another line"),
                 ("", ""),
             ],
+        );
+    }
+
+    #[test]
+    fn verify_app() {
+        use clap::CommandFactory;
+        Args::command().debug_assert();
+    }
+
+    #[test]
+    fn test_parse_output_format_iso8601() {
+        assert_eq!(parse_output_format("iso"), Ok(OutputFormat::Iso8601));
+    }
+
+    #[test]
+    fn test_parse_output_format_unix() {
+        assert_eq!(
+            parse_output_format("unix"),
+            Ok(OutputFormat::Unix(Unit::Seconds))
+        );
+        assert_eq!(
+            parse_output_format("unix,s"),
+            Ok(OutputFormat::Unix(Unit::Seconds))
+        );
+        assert_eq!(
+            parse_output_format("unix,ms"),
+            Ok(OutputFormat::Unix(Unit::Milliseconds))
+        );
+        assert_eq!(
+            parse_output_format("unix,us"),
+            Ok(OutputFormat::Unix(Unit::Microseconds))
+        );
+        assert_eq!(
+            parse_output_format("unix,ns"),
+            Ok(OutputFormat::Unix(Unit::Nanoseconds))
+        );
+    }
+
+    #[test]
+    fn test_parse_output_format_delta() {
+        assert_eq!(
+            parse_output_format("delta,ms"),
+            Ok(OutputFormat::Delta(Unit::Milliseconds))
         );
     }
 }

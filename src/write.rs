@@ -1,6 +1,6 @@
 use chrono::NaiveDateTime;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unit {
     Seconds,
     Milliseconds,
@@ -8,7 +8,7 @@ pub enum Unit {
     Nanoseconds,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputFormat {
     Iso8601,
     Unix(Unit),
