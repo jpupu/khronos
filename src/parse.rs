@@ -1,7 +1,7 @@
 use chrono::{Duration, NaiveDateTime};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InputFormat<'a> {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InputFormat {
     /// Seconds since midnight 1970-01-01
     Unix,
     /// Milliseconds since midnight 1970-01-01
@@ -9,7 +9,7 @@ pub enum InputFormat<'a> {
     /// E.g. "%Y-%m-%d %H:%M". Date, hour and minute fields are mandatory.
     Epoc(NaiveDateTime),
     Iso8601,
-    Custom(&'a str),
+    Custom(String),
 }
 
 /// Parses a decimal number into integer and nano parts.
@@ -26,7 +26,7 @@ fn parse_decimal(s: &str) -> Option<(i64, u32)> {
 }
 
 /// Parses string to datetime according to given format.
-pub fn parse_string(s: &str, format: InputFormat) -> Option<NaiveDateTime> {
+pub fn parse_string(s: &str, format: &InputFormat) -> Option<NaiveDateTime> {
     Some(match format {
         InputFormat::Unix => {
             let (sec, nsec) = parse_decimal(s)?;
@@ -41,7 +41,7 @@ pub fn parse_string(s: &str, format: InputFormat) -> Option<NaiveDateTime> {
         }
         InputFormat::Epoc(epoc) => {
             let (sec, nsec) = parse_decimal(s)?;
-            epoc + Duration::seconds(sec) + Duration::nanoseconds(nsec.into())
+            *epoc + Duration::seconds(sec) + Duration::nanoseconds(nsec.into())
         }
         InputFormat::Iso8601 => NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f").ok()?,
         InputFormat::Custom(fmt) => NaiveDateTime::parse_from_str(s, &fmt).ok()?,
@@ -54,7 +54,7 @@ pub fn parse_string(s: &str, format: InputFormat) -> Option<NaiveDateTime> {
 /// tab), and is followed by whitespace. This whitespace is included in the remainder.
 ///
 /// If timestamp cannot be parsed, returns None as timestamp and the whole line as the remainder.
-pub fn parse_line<'a>(s: &'a str, format: InputFormat) -> (Option<NaiveDateTime>, &'a str) {
+pub fn parse_line<'a>(s: &'a str, format: &InputFormat) -> (Option<NaiveDateTime>, &'a str) {
     match s.find(&[' ', '\t']) {
         Some(i) => match parse_string(&s[..i], format) {
             Some(timestamp) => (Some(timestamp), &s[i..]),
@@ -104,27 +104,27 @@ mod tests {
     #[test]
     fn test_parse_string_unix() {
         assert_eq!(
-            parse_string("1000", InputFormat::Unix),
+            parse_string("1000", &InputFormat::Unix),
             Some(NaiveDateTime::from_timestamp(1000, 0))
         );
         assert_eq!(
-            parse_string("1000.000123456", InputFormat::Unix),
+            parse_string("1000.000123456", &InputFormat::Unix),
             Some(NaiveDateTime::from_timestamp(1000, 123456))
         );
-        assert_eq!(parse_string("abc", InputFormat::Unix), None);
+        assert_eq!(parse_string("abc", &InputFormat::Unix), None);
     }
 
     #[test]
     fn test_parse_string_unixms() {
         assert_eq!(
-            parse_string("1234", InputFormat::UnixMs),
+            parse_string("1234", &InputFormat::UnixMs),
             Some(NaiveDateTime::from_timestamp(1, 234_000_000))
         );
         assert_eq!(
-            parse_string("1000.000123456", InputFormat::UnixMs),
+            parse_string("1000.000123456", &InputFormat::UnixMs),
             Some(NaiveDateTime::from_timestamp(1, 123))
         );
-        assert_eq!(parse_string("abc", InputFormat::UnixMs), None);
+        assert_eq!(parse_string("abc", &InputFormat::UnixMs), None);
     }
 
     #[test]
@@ -134,20 +134,20 @@ mod tests {
             NaiveTime::from_hms(0, 0, 0),
         );
         assert_eq!(
-            parse_string("86460", InputFormat::Epoc(epoc)),
+            parse_string("86460", &InputFormat::Epoc(epoc)),
             Some(epoc + Duration::days(1) + Duration::minutes(1))
         );
         assert_eq!(
-            parse_string("86460.001", InputFormat::Epoc(epoc)),
+            parse_string("86460.001", &InputFormat::Epoc(epoc)),
             Some(epoc + Duration::days(1) + Duration::minutes(1) + Duration::milliseconds(1))
         );
-        assert_eq!(parse_string("abc", InputFormat::Epoc(epoc)), None);
+        assert_eq!(parse_string("abc", &InputFormat::Epoc(epoc)), None);
     }
 
     #[test]
     fn test_parse_string_custom() {
         assert_eq!(
-            parse_string("2001-02-13 12:34", InputFormat::Custom("%Y-%m-%d %H:%M")),
+            parse_string("2001-02-13 12:34", &InputFormat::Custom("%Y-%m-%d %H:%M".to_string())),
             Some(NaiveDateTime::new(
                 NaiveDate::from_ymd(2001, 2, 13),
                 NaiveTime::from_hms(12, 34, 0)
@@ -156,7 +156,7 @@ mod tests {
         assert_eq!(
             parse_string(
                 "2001-02-13 12:34:56.123456",
-                InputFormat::Custom("%Y-%m-%d %H:%M:%S%.f")
+                &InputFormat::Custom("%Y-%m-%d %H:%M:%S%.f".to_string())
             ),
             Some(NaiveDateTime::new(
                 NaiveDate::from_ymd(2001, 2, 13),
@@ -164,11 +164,11 @@ mod tests {
             ))
         );
         assert_eq!(
-            parse_string("2001x02x13 12x34", InputFormat::Custom("%Y-%m-%d %H:%M")),
+            parse_string("2001x02x13 12x34", &InputFormat::Custom("%Y-%m-%d %H:%M".to_string())),
             None
         );
         assert_eq!(
-            parse_string("2001x02x13", InputFormat::Custom("%Y-%m-%d %H:%M")),
+            parse_string("2001x02x13", &InputFormat::Custom("%Y-%m-%d %H:%M".to_string())),
             None
         );
     }
@@ -177,7 +177,7 @@ mod tests {
     fn test_parse_string_iso8601() {
         // With milliseconds
         assert_eq!(
-            parse_string("2001-02-13T12:34:56.123", InputFormat::Iso8601),
+            parse_string("2001-02-13T12:34:56.123", &InputFormat::Iso8601),
             Some(NaiveDateTime::new(
                 NaiveDate::from_ymd(2001, 2, 13),
                 NaiveTime::from_hms_milli(12, 34, 56, 123)
@@ -185,7 +185,7 @@ mod tests {
         );
         // With nanoseconds
         assert_eq!(
-            parse_string("2001-02-13T12:34:56.123456789", InputFormat::Iso8601),
+            parse_string("2001-02-13T12:34:56.123456789", &InputFormat::Iso8601),
             Some(NaiveDateTime::new(
                 NaiveDate::from_ymd(2001, 2, 13),
                 NaiveTime::from_hms_nano(12, 34, 56, 123456789)
@@ -193,7 +193,7 @@ mod tests {
         );
         // No fractional seconds
         assert_eq!(
-            parse_string("2001-02-13T12:34:56", InputFormat::Iso8601),
+            parse_string("2001-02-13T12:34:56", &InputFormat::Iso8601),
             Some(NaiveDateTime::new(
                 NaiveDate::from_ymd(2001, 2, 13),
                 NaiveTime::from_hms(12, 34, 56)
@@ -201,7 +201,7 @@ mod tests {
         );
         // Space as date-time separator.
         assert_eq!(
-            parse_string("2001-02-13 12:34:56", InputFormat::Iso8601),
+            parse_string("2001-02-13 12:34:56", &InputFormat::Iso8601),
             None
         );
     }
@@ -210,7 +210,7 @@ mod tests {
     fn test_parse_line() {
         // Space separator
         assert_eq!(
-            parse_line("123.4 Log message", InputFormat::Unix),
+            parse_line("123.4 Log message", &InputFormat::Unix),
             (
                 Some(NaiveDateTime::from_timestamp(123, 400_000_000)),
                 " Log message"
@@ -218,7 +218,7 @@ mod tests {
         );
         // Tab separator
         assert_eq!(
-            parse_line("123.4\tLog message", InputFormat::Unix),
+            parse_line("123.4\tLog message", &InputFormat::Unix),
             (
                 Some(NaiveDateTime::from_timestamp(123, 400_000_000)),
                 "\tLog message"
@@ -226,21 +226,21 @@ mod tests {
         );
         // No timestamp, message contains separator.
         assert_eq!(
-            parse_line("Log message", InputFormat::Unix),
+            parse_line("Log message", &InputFormat::Unix),
             (None, "Log message")
         );
         // No whitespace
         assert_eq!(
-            parse_line("Logmessage", InputFormat::Unix),
+            parse_line("Logmessage", &InputFormat::Unix),
             (None, "Logmessage")
         );
         // Start with space
         assert_eq!(
-            parse_line(" Logmessage", InputFormat::Unix),
+            parse_line(" Logmessage", &InputFormat::Unix),
             (None, " Logmessage")
         );
         // Empty
-        assert_eq!(parse_line("", InputFormat::Unix), (None, ""));
+        assert_eq!(parse_line("", &InputFormat::Unix), (None, ""));
     }
 
     #[test]

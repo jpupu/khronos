@@ -4,8 +4,32 @@ use std::io::{self, BufRead};
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[clap(parse(try_from_str=parse_output_format))]
+    /// Input format. Auto-detect if not specified.
+    #[clap(
+        short,
+        long,
+        value_name="FMT",
+        parse(try_from_str=parse_input_format),
+    )]
+    informat: Option<InputFormat>,
+
+    /// Output format.
+    #[clap(short,
+        long,
+        value_name="FMT",
+        default_value="iso",
+        parse(try_from_str=parse_output_format),
+    )]
     outformat: OutputFormat,
+}
+
+fn parse_input_format(s: &str) -> Result<InputFormat, String> {
+    match s {
+        "unix" => Ok(InputFormat::Unix),
+        "unixms" => Ok(InputFormat::UnixMs),
+        "iso" => Ok(InputFormat::Iso8601),
+        _ => Err("Invalid format".to_string()),
+    }
 }
 
 fn parse_output_format(s: &str) -> Result<OutputFormat, String> {
@@ -43,14 +67,15 @@ fn parse_output_format(s: &str) -> Result<OutputFormat, String> {
     }
 }
 
-fn process_text<R, F>(informat: InputFormat, outformat: OutputFormat, input: R, mut func: F)
+fn process_text<R, F>(informat: Option<InputFormat>, outformat: OutputFormat, input: R, mut func: F)
 where
     R: BufRead,
     F: FnMut(&str, &str),
 {
+    let informat = informat.expect("auto detect not implemented");
     let mut prev_intime = None;
     for line in input.lines().map(|x| x.expect("line error")) {
-        let (intime, text) = khronos::parse_line(&line, informat);
+        let (intime, text) = khronos::parse_line(&line, &informat);
         let outtime = match intime {
             Some(t) => khronos::write(outformat, t, prev_intime),
             None => "".to_string(),
@@ -63,10 +88,9 @@ where
 
 fn main() {
     let args = Args::parse();
-    let informat = InputFormat::Unix;
 
     process_text(
-        informat,
+        args.informat,
         args.outformat,
         io::stdin().lock(),
         |time, text| println!("{}{}", time, text),
@@ -78,7 +102,7 @@ mod tests {
     use super::*;
 
     fn check_process_text(
-        informat: InputFormat,
+        informat: Option<InputFormat>,
         outformat: OutputFormat,
         input: &str,
         expected_output: Vec<(&str, &str)>,
@@ -96,7 +120,7 @@ mod tests {
     #[test]
     fn basic() {
         check_process_text(
-            InputFormat::Unix,
+            Some(InputFormat::Unix),
             OutputFormat::Iso8601,
             "000.0 a line\n60.66 another line\n",
             vec![
@@ -109,7 +133,7 @@ mod tests {
     #[test]
     fn no_timestamp() {
         check_process_text(
-            InputFormat::Unix,
+            Some(InputFormat::Unix),
             OutputFormat::Iso8601,
             "000.0 a line\nanother line\n\n",
             vec![
