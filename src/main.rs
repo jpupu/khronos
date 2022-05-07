@@ -2,7 +2,40 @@ use clap::Parser;
 use khronos::{self, InputFormat, OutputFormat, Precision, Unit};
 use std::io::{self, BufRead};
 
+/// Log timestamp rewriter
+///
+/// Reads from stdin lines and rewrites their timestamps. The timestamp must
+/// be at the start of line and separated from the message by at least one
+/// space. If the timestamp of a line cannot be successfully parsed, the line
+/// is output as-is.
+///
+/// If onput format is not given it is automatically deduced from input.
+/// In this case the lines are read and output as-is until the first
+/// recognizable timestamp is met.
 #[derive(Parser, Debug)]
+#[clap(
+    after_help = r"INPUT FORMATS:
+    iso     ISO 8601
+    unix    Unix time in (fractional) seconds
+    unixms  Unix time in (fractional) milliseconds
+
+OUTPUT FORMATS:
+    iso     ISO 8601. Options: precision
+    unix    Unix time. Options: units, precision
+    delta   Time since previous line. Options: units, precision
+
+OUTPUT OPTIONS:
+    precision   .0 | .1 | .2 | ... | .9
+    units       s | ms | us | ns
+
+EXAMPLES:
+    Specify unix time in milliseconds with 3 fractional digits:
+        unix,ms,.3
+
+    Specify delta in seconds with 6 fractional digits:
+        delta,.6
+"
+)]
 struct Args {
     /// Input format. Auto-detect if not specified.
     #[clap(
@@ -16,7 +49,7 @@ struct Args {
     /// Output format.
     #[clap(short,
         long,
-        value_name="FMT",
+        value_name="FMT[,OPTION...]",
         default_value="iso",
         parse(try_from_str=parse_output_format),
     )]
