@@ -1,5 +1,5 @@
 use clap::Parser;
-use khronos::{self, InputFormat, OutputFormat, Unit};
+use khronos::{self, InputFormat, OutputFormat, Precision, Unit};
 use std::io::{self, BufRead};
 
 #[derive(Parser, Debug)]
@@ -32,36 +32,70 @@ fn parse_input_format(s: &str) -> Result<InputFormat, String> {
     }
 }
 
+fn try_parse_unit(s: &str) -> Option<Unit> {
+    match s {
+        "s" => Some(Unit::Seconds),
+        "ms" => Some(Unit::Milliseconds),
+        "us" => Some(Unit::Microseconds),
+        "ns" => Some(Unit::Nanoseconds),
+        _ => None,
+    }
+}
+
+fn try_parse_precision(s: &str) -> Option<Precision> {
+    if s.starts_with(".") {
+        s[1..]
+            .parse()
+            .ok()
+            .filter(|x| *x <= 9)
+            .map(|x| Precision(x))
+    } else {
+        None
+    }
+}
+
 fn parse_output_format(s: &str) -> Result<OutputFormat, String> {
     let args = s.split(',').collect::<Vec<&str>>();
     let (fmt, args) = args.split_first().unwrap();
     match *fmt {
-        "iso" => Ok(OutputFormat::Iso8601),
+        "iso" => {
+            let mut prec = Precision(0);
+            for a in args {
+                if let Some(p) = try_parse_precision(a) {
+                    prec = p;
+                } else {
+                    return Err(format!("Invalid format argument {:?}", a));
+                }
+            }
+            Ok(OutputFormat::Iso8601(prec))
+        }
         "unix" => {
             let mut unit = Unit::Seconds;
+            let mut prec = Precision(0);
             for a in args {
-                match *a {
-                    "s" => unit = Unit::Seconds,
-                    "ms" => unit = Unit::Milliseconds,
-                    "us" => unit = Unit::Microseconds,
-                    "ns" => unit = Unit::Nanoseconds,
-                    _ => return Err(format!("Invalid format argument {:?}", a)),
-                };
+                if let Some(u) = try_parse_unit(a) {
+                    unit = u;
+                } else if let Some(p) = try_parse_precision(a) {
+                    prec = p;
+                } else {
+                    return Err(format!("Invalid format argument {:?}", a));
+                }
             }
-            Ok(OutputFormat::Unix(unit))
+            Ok(OutputFormat::Unix(unit, prec))
         }
         "delta" => {
             let mut unit = Unit::Seconds;
+            let mut prec = Precision(0);
             for a in args {
-                match *a {
-                    "s" => unit = Unit::Seconds,
-                    "ms" => unit = Unit::Milliseconds,
-                    "us" => unit = Unit::Microseconds,
-                    "ns" => unit = Unit::Nanoseconds,
-                    _ => return Err(format!("Invalid format argument {:?}", a)),
-                };
+                if let Some(u) = try_parse_unit(a) {
+                    unit = u;
+                } else if let Some(p) = try_parse_precision(a) {
+                    prec = p;
+                } else {
+                    return Err(format!("Invalid format argument {:?}", a));
+                }
             }
-            Ok(OutputFormat::Delta(unit))
+            Ok(OutputFormat::Delta(unit, prec))
         }
         _ => Err("Invalid output format".to_string()),
     }
@@ -133,7 +167,7 @@ mod tests {
     fn basic() {
         check_process_text(
             Some(InputFormat::Unix),
-            OutputFormat::Iso8601,
+            OutputFormat::Iso8601(Precision(0)),
             "000.0 a line\n60.66 another line\n",
             vec![
                 ("1970-01-01T00:00:00", " a line"),
@@ -146,7 +180,7 @@ mod tests {
     fn no_timestamp() {
         check_process_text(
             Some(InputFormat::Unix),
-            OutputFormat::Iso8601,
+            OutputFormat::Iso8601(Precision(0)),
             "000.0 a line\nanother line\n\n",
             vec![
                 ("1970-01-01T00:00:00", " a line"),
@@ -160,7 +194,7 @@ mod tests {
     fn auto_detect_input_format_from_first_line() {
         check_process_text(
             None,
-            OutputFormat::Iso8601,
+            OutputFormat::Iso8601(Precision(0)),
             "000.0 a line\n60.66 another line\n",
             vec![
                 ("1970-01-01T00:00:00", " a line"),
@@ -173,7 +207,7 @@ mod tests {
     fn auto_detect_input_format_from_second_line() {
         check_process_text(
             None,
-            OutputFormat::Iso8601,
+            OutputFormat::Iso8601(Precision(0)),
             "notime\nstillno\n000.0 a line\n60.66 another line\n",
             vec![
                 ("", "notime"),
@@ -192,30 +226,53 @@ mod tests {
 
     #[test]
     fn test_parse_output_format_iso8601() {
-        assert_eq!(parse_output_format("iso"), Ok(OutputFormat::Iso8601));
+        assert_eq!(
+            parse_output_format("iso"),
+            Ok(OutputFormat::Iso8601(Precision(0)))
+        );
+        assert_eq!(
+            parse_output_format("iso,.1"),
+            Ok(OutputFormat::Iso8601(Precision(1)))
+        );
+        assert_eq!(
+            parse_output_format("iso,.3"),
+            Ok(OutputFormat::Iso8601(Precision(3)))
+        );
     }
 
     #[test]
     fn test_parse_output_format_unix() {
         assert_eq!(
             parse_output_format("unix"),
-            Ok(OutputFormat::Unix(Unit::Seconds))
+            Ok(OutputFormat::Unix(Unit::Seconds, Precision(0)))
         );
         assert_eq!(
             parse_output_format("unix,s"),
-            Ok(OutputFormat::Unix(Unit::Seconds))
+            Ok(OutputFormat::Unix(Unit::Seconds, Precision(0)))
         );
         assert_eq!(
             parse_output_format("unix,ms"),
-            Ok(OutputFormat::Unix(Unit::Milliseconds))
+            Ok(OutputFormat::Unix(Unit::Milliseconds, Precision(0)))
         );
         assert_eq!(
             parse_output_format("unix,us"),
-            Ok(OutputFormat::Unix(Unit::Microseconds))
+            Ok(OutputFormat::Unix(Unit::Microseconds, Precision(0)))
         );
         assert_eq!(
             parse_output_format("unix,ns"),
-            Ok(OutputFormat::Unix(Unit::Nanoseconds))
+            Ok(OutputFormat::Unix(Unit::Nanoseconds, Precision(0)))
+        );
+        assert_eq!(
+            parse_output_format("unix,.3"),
+            Ok(OutputFormat::Unix(Unit::Seconds, Precision(3)))
+        );
+        assert_eq!(
+            parse_output_format("unix,ns,.1"),
+            Ok(OutputFormat::Unix(Unit::Nanoseconds, Precision(1)))
+        );
+        assert_eq!(
+            parse_output_format("unix,.1,ns"),
+            Ok(OutputFormat::Unix(Unit::Nanoseconds, Precision(1)))
         );
     }
 
@@ -223,7 +280,11 @@ mod tests {
     fn test_parse_output_format_delta() {
         assert_eq!(
             parse_output_format("delta,ms"),
-            Ok(OutputFormat::Delta(Unit::Milliseconds))
+            Ok(OutputFormat::Delta(Unit::Milliseconds, Precision(0)))
+        );
+        assert_eq!(
+            parse_output_format("delta,.9"),
+            Ok(OutputFormat::Delta(Unit::Seconds, Precision(9)))
         );
     }
 }
