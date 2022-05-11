@@ -9,24 +9,24 @@ use std::io::{self, BufRead};
 /// space. If the timestamp of a line cannot be successfully parsed, the line
 /// is output as-is.
 ///
-/// If onput format is not given it is automatically deduced from input.
+/// If input format is not given it is automatically deduced from input.
 /// In this case the lines are read and output as-is until the first
 /// recognizable timestamp is met.
 #[derive(Parser, Debug)]
-#[clap(
-    after_help = r"INPUT FORMATS:
+#[clap(after_help = r"INPUT FORMATS:
     iso     ISO 8601
     unix    Unix time in (fractional) seconds
     unixms  Unix time in (fractional) milliseconds
 
 OUTPUT FORMATS:
-    iso     ISO 8601. Options: precision
+    iso     ISO 8601. Options: precision, nodate
     unix    Unix time. Options: units, precision
     delta   Time since previous line. Options: units, precision
 
 OUTPUT OPTIONS:
     precision   .0 | .1 | .2 | ... | .9
     units       s | ms | us | ns
+    nodate      nodate
 
 EXAMPLES:
     Specify unix time in milliseconds with 3 fractional digits:
@@ -34,8 +34,7 @@ EXAMPLES:
 
     Specify delta in seconds with 6 fractional digits:
         delta,.6
-"
-)]
+")]
 struct Args {
     /// Input format. Auto-detect if not specified.
     #[clap(
@@ -93,14 +92,17 @@ fn parse_output_format(s: &str) -> Result<OutputFormat, String> {
     match *fmt {
         "iso" => {
             let mut prec = Precision(0);
+            let mut time_only = false;
             for a in args {
                 if let Some(p) = try_parse_precision(a) {
                     prec = p;
+                } else if *a == "nodate" {
+                    time_only = true;
                 } else {
                     return Err(format!("Invalid format argument {:?}", a));
                 }
             }
-            Ok(OutputFormat::Iso8601(prec))
+            Ok(OutputFormat::Iso8601 { prec, time_only })
         }
         "unix" => {
             let mut unit = Unit::Seconds;
@@ -200,7 +202,10 @@ mod tests {
     fn basic() {
         check_process_text(
             Some(InputFormat::Unix),
-            OutputFormat::Iso8601(Precision(0)),
+            OutputFormat::Iso8601 {
+                prec: Precision(0),
+                time_only: false,
+            },
             "000.0 a line\n60.66 another line\n",
             vec![
                 ("1970-01-01T00:00:00", " a line"),
@@ -213,7 +218,10 @@ mod tests {
     fn no_timestamp() {
         check_process_text(
             Some(InputFormat::Unix),
-            OutputFormat::Iso8601(Precision(0)),
+            OutputFormat::Iso8601 {
+                prec: Precision(0),
+                time_only: false,
+            },
             "000.0 a line\nanother line\n\n",
             vec![
                 ("1970-01-01T00:00:00", " a line"),
@@ -227,7 +235,10 @@ mod tests {
     fn auto_detect_input_format_from_first_line() {
         check_process_text(
             None,
-            OutputFormat::Iso8601(Precision(0)),
+            OutputFormat::Iso8601 {
+                prec: Precision(0),
+                time_only: false,
+            },
             "000.0 a line\n60.66 another line\n",
             vec![
                 ("1970-01-01T00:00:00", " a line"),
@@ -240,7 +251,10 @@ mod tests {
     fn auto_detect_input_format_from_second_line() {
         check_process_text(
             None,
-            OutputFormat::Iso8601(Precision(0)),
+            OutputFormat::Iso8601 {
+                prec: Precision(0),
+                time_only: false,
+            },
             "notime\nstillno\n000.0 a line\n60.66 another line\n",
             vec![
                 ("", "notime"),
@@ -261,15 +275,31 @@ mod tests {
     fn test_parse_output_format_iso8601() {
         assert_eq!(
             parse_output_format("iso"),
-            Ok(OutputFormat::Iso8601(Precision(0)))
+            Ok(OutputFormat::Iso8601 {
+                prec: Precision(0),
+                time_only: false
+            })
         );
         assert_eq!(
             parse_output_format("iso,.1"),
-            Ok(OutputFormat::Iso8601(Precision(1)))
+            Ok(OutputFormat::Iso8601 {
+                prec: Precision(1),
+                time_only: false
+            })
         );
         assert_eq!(
             parse_output_format("iso,.3"),
-            Ok(OutputFormat::Iso8601(Precision(3)))
+            Ok(OutputFormat::Iso8601 {
+                prec: Precision(3),
+                time_only: false
+            })
+        );
+        assert_eq!(
+            parse_output_format("iso,.3,nodate"),
+            Ok(OutputFormat::Iso8601 {
+                prec: Precision(3),
+                time_only: true
+            })
         );
     }
 

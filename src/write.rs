@@ -13,7 +13,7 @@ pub struct Precision(pub usize);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputFormat {
-    Iso8601(Precision),
+    Iso8601 { prec: Precision, time_only: bool },
     Unix(Unit, Precision),
     Delta(Unit, Precision),
 }
@@ -50,10 +50,17 @@ fn format_seconds(seconds: i64, nanos: u32, units: Unit, prec: Precision) -> Str
 
 pub fn write(format: OutputFormat, t: NaiveDateTime, prev_t: Option<NaiveDateTime>) -> String {
     match format {
-        OutputFormat::Iso8601(Precision(0)) => t.format("%Y-%m-%dT%H:%M:%S").to_string(),
-        OutputFormat::Iso8601(prec) => {
-            let mut s = t.format("%Y-%m-%dT%H:%M:%S%.9f").to_string();
-            s.truncate(20 + prec.0);
+        OutputFormat::Iso8601 { prec, time_only } => {
+            let mut s = t
+                .format(match time_only {
+                    false => "%Y-%m-%dT%H:%M:%S%.9f",
+                    true => "%H:%M:%S%.9f",
+                })
+                .to_string();
+            match prec {
+                Precision(0) => s.truncate(s.len() - 10),
+                Precision(n) => s.truncate(s.len() - 9 + n),
+            }
             s
         }
         OutputFormat::Unix(unit, prec) => {
@@ -83,16 +90,59 @@ mod tests {
     #[test]
     fn output_iso8601() {
         assert_eq!(
-            write(OutputFormat::Iso8601(Precision(0)), some_date(), None),
+            write(
+                OutputFormat::Iso8601 {
+                    prec: Precision(0),
+                    time_only: false
+                },
+                some_date(),
+                None
+            ),
             "2001-02-15T12:34:56"
         );
         assert_eq!(
-            write(OutputFormat::Iso8601(Precision(1)), some_date(), None),
+            write(
+                OutputFormat::Iso8601 {
+                    prec: Precision(1),
+                    time_only: false
+                },
+                some_date(),
+                None
+            ),
             "2001-02-15T12:34:56.1"
         );
         assert_eq!(
-            write(OutputFormat::Iso8601(Precision(3)), some_date(), None),
+            write(
+                OutputFormat::Iso8601 {
+                    prec: Precision(3),
+                    time_only: false
+                },
+                some_date(),
+                None
+            ),
             "2001-02-15T12:34:56.123"
+        );
+        assert_eq!(
+            write(
+                OutputFormat::Iso8601 {
+                    prec: Precision(0),
+                    time_only: true
+                },
+                some_date(),
+                None
+            ),
+            "12:34:56"
+        );
+        assert_eq!(
+            write(
+                OutputFormat::Iso8601 {
+                    prec: Precision(3),
+                    time_only: true
+                },
+                some_date(),
+                None
+            ),
+            "12:34:56.123"
         );
     }
 
