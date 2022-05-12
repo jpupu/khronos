@@ -22,6 +22,7 @@ OUTPUT FORMATS:
     iso     ISO 8601. Options: precision, nodate
     unix    Unix time. Options: units, precision
     delta   Time since previous line. Options: units, precision
+    elapsed Time since log start. Options: units, precision
 
 OUTPUT OPTIONS:
     precision   .0 | .1 | .2 | ... | .9
@@ -132,6 +133,20 @@ fn parse_output_format(s: &str) -> Result<OutputFormat, String> {
             }
             Ok(OutputFormat::Delta(unit, prec))
         }
+        "elapsed" => {
+            let mut unit = Unit::Seconds;
+            let mut prec = Precision(0);
+            for a in args {
+                if let Some(u) = try_parse_unit(a) {
+                    unit = u;
+                } else if let Some(p) = try_parse_precision(a) {
+                    prec = p;
+                } else {
+                    return Err(format!("Invalid format argument {:?}", a));
+                }
+            }
+            Ok(OutputFormat::Elapsed(unit, prec))
+        }
         _ => Err("Invalid output format".to_string()),
     }
 }
@@ -145,7 +160,8 @@ fn process_text<R, F>(
     R: BufRead,
     F: FnMut(&str, &str),
 {
-    let mut prev_intime = None;
+    let mut prev_time = None;
+    let mut first_time = None;
     for line in input.lines().map(|x| x.expect("line error")) {
         // Try to auto-detect input format if it's not known.
         if informat.is_none() {
@@ -154,12 +170,16 @@ fn process_text<R, F>(
 
         // Process line.
         if let Some(ref fmt) = informat {
-            let (intime, text) = khronos::parse_line(&line, fmt);
-            let outtime = match intime {
-                Some(t) => khronos::write(outformat, t, prev_intime),
+            let (time, text) = khronos::parse_line(&line, fmt);
+            let outtime = match time {
+                Some(t) => {
+                    let s = khronos::write(outformat, t, prev_time, first_time);
+                    prev_time = time;
+                    first_time = first_time.or(time);
+                    s
+                }
                 None => "".to_string(),
             };
-            prev_intime = intime;
             func(&outtime, text);
         } else {
             func("", &line);
@@ -227,6 +247,77 @@ mod tests {
                 ("1970-01-01T00:00:00", " a line"),
                 ("", "another line"),
                 ("", ""),
+            ],
+        );
+    }
+
+    #[test]
+    fn process_unix() {
+        check_process_text(
+            Some(InputFormat::Unix),
+            OutputFormat::Unix(Unit::Seconds, Precision(0)),
+            "10.0 first\n11.0 second\n13.0 third\n",
+            vec![("10", " first"), ("11", " second"), ("13", " third")],
+        );
+    }
+
+    #[test]
+    fn process_iso() {
+        check_process_text(
+            Some(InputFormat::Unix),
+            OutputFormat::Iso8601 {
+                prec: Precision(0),
+                time_only: false,
+            },
+            "10.0 first\n11.0 second\n13.0 third\n",
+            vec![
+                ("1970-01-01T00:00:10", " first"),
+                ("1970-01-01T00:00:11", " second"),
+                ("1970-01-01T00:00:13", " third"),
+            ],
+        );
+    }
+
+    #[test]
+    fn process_delta() {
+        check_process_text(
+            Some(InputFormat::Unix),
+            OutputFormat::Delta(Unit::Seconds, Precision(0)),
+            "10.0 first\n11.0 second\n13.0 third\n",
+            vec![("0", " first"), ("1", " second"), ("2", " third")],
+        );
+        check_process_text(
+            Some(InputFormat::Unix),
+            OutputFormat::Delta(Unit::Seconds, Precision(0)),
+            "invalid line\n10.0 first\n11.0 second\ninvalid line\n13.0 third\n",
+            vec![
+                ("", "invalid line"),
+                ("0", " first"),
+                ("1", " second"),
+                ("", "invalid line"),
+                ("2", " third"),
+            ],
+        );
+    }
+
+    #[test]
+    fn process_elapsed() {
+        check_process_text(
+            Some(InputFormat::Unix),
+            OutputFormat::Elapsed(Unit::Seconds, Precision(0)),
+            "10.0 first\n11.0 second\n13.0 third\n",
+            vec![("0", " first"), ("1", " second"), ("3", " third")],
+        );
+        check_process_text(
+            Some(InputFormat::Unix),
+            OutputFormat::Elapsed(Unit::Seconds, Precision(0)),
+            "invalid line\n10.0 first\n11.0 second\ninvalid line\n13.0 third\n",
+            vec![
+                ("", "invalid line"),
+                ("0", " first"),
+                ("1", " second"),
+                ("", "invalid line"),
+                ("3", " third"),
             ],
         );
     }
@@ -348,6 +439,18 @@ mod tests {
         assert_eq!(
             parse_output_format("delta,.9"),
             Ok(OutputFormat::Delta(Unit::Seconds, Precision(9)))
+        );
+    }
+
+    #[test]
+    fn test_parse_output_format_elapsed() {
+        assert_eq!(
+            parse_output_format("elapsed,ms"),
+            Ok(OutputFormat::Elapsed(Unit::Milliseconds, Precision(0)))
+        );
+        assert_eq!(
+            parse_output_format("elapsed,.9"),
+            Ok(OutputFormat::Elapsed(Unit::Seconds, Precision(9)))
         );
     }
 }

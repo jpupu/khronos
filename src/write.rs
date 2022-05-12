@@ -16,6 +16,7 @@ pub enum OutputFormat {
     Iso8601 { prec: Precision, time_only: bool },
     Unix(Unit, Precision),
     Delta(Unit, Precision),
+    Elapsed(Unit, Precision),
 }
 
 fn format_seconds(seconds: i64, nanos: u32, units: Unit, prec: Precision) -> String {
@@ -48,7 +49,12 @@ fn format_seconds(seconds: i64, nanos: u32, units: Unit, prec: Precision) -> Str
     }
 }
 
-pub fn write(format: OutputFormat, t: NaiveDateTime, prev_t: Option<NaiveDateTime>) -> String {
+pub fn write(
+    format: OutputFormat,
+    t: NaiveDateTime,
+    prev_t: Option<NaiveDateTime>,
+    first_t: Option<NaiveDateTime>,
+) -> String {
     match format {
         OutputFormat::Iso8601 { prec, time_only } => {
             let mut s = t
@@ -68,6 +74,12 @@ pub fn write(format: OutputFormat, t: NaiveDateTime, prev_t: Option<NaiveDateTim
         }
         OutputFormat::Delta(unit, prec) => {
             let ns = (t - prev_t.unwrap_or(t))
+                .num_nanoseconds()
+                .expect("Too large delta");
+            format_seconds(ns / 1_000_000_000, (ns % 1_000_000_000) as u32, unit, prec)
+        }
+        OutputFormat::Elapsed(unit, prec) => {
+            let ns = (t - first_t.unwrap_or(t))
                 .num_nanoseconds()
                 .expect("Too large delta");
             format_seconds(ns / 1_000_000_000, (ns % 1_000_000_000) as u32, unit, prec)
@@ -96,6 +108,7 @@ mod tests {
                     time_only: false
                 },
                 some_date(),
+                None,
                 None
             ),
             "2001-02-15T12:34:56"
@@ -107,6 +120,7 @@ mod tests {
                     time_only: false
                 },
                 some_date(),
+                None,
                 None
             ),
             "2001-02-15T12:34:56.1"
@@ -118,6 +132,7 @@ mod tests {
                     time_only: false
                 },
                 some_date(),
+                None,
                 None
             ),
             "2001-02-15T12:34:56.123"
@@ -129,6 +144,7 @@ mod tests {
                     time_only: true
                 },
                 some_date(),
+                None,
                 None
             ),
             "12:34:56"
@@ -140,6 +156,7 @@ mod tests {
                     time_only: true
                 },
                 some_date(),
+                None,
                 None
             ),
             "12:34:56.123"
@@ -152,6 +169,7 @@ mod tests {
             write(
                 OutputFormat::Unix(Unit::Seconds, Precision(0)),
                 some_date(),
+                None,
                 None
             ),
             "982240496"
@@ -160,6 +178,7 @@ mod tests {
             write(
                 OutputFormat::Unix(Unit::Milliseconds, Precision(0)),
                 some_date(),
+                None,
                 None
             ),
             "982240496123"
@@ -168,6 +187,7 @@ mod tests {
             write(
                 OutputFormat::Unix(Unit::Microseconds, Precision(3)),
                 some_date(),
+                None,
                 None
             ),
             "982240496123456.789"
@@ -176,6 +196,7 @@ mod tests {
             write(
                 OutputFormat::Unix(Unit::Nanoseconds, Precision(9)),
                 some_date(),
+                None,
                 None
             ),
             "982240496123456789.000000000"
@@ -188,6 +209,7 @@ mod tests {
             write(
                 OutputFormat::Delta(Unit::Seconds, Precision(0)),
                 some_date(),
+                None,
                 None
             ),
             "0"
@@ -197,6 +219,7 @@ mod tests {
                 OutputFormat::Delta(Unit::Seconds, Precision(0)),
                 some_date(),
                 Some(some_date() - Duration::seconds(130)),
+                None,
             ),
             "130"
         );
@@ -205,6 +228,7 @@ mod tests {
                 OutputFormat::Delta(Unit::Milliseconds, Precision(0)),
                 some_date(),
                 Some(some_date() - Duration::milliseconds(130)),
+                None,
             ),
             "130"
         );
@@ -213,6 +237,7 @@ mod tests {
                 OutputFormat::Delta(Unit::Microseconds, Precision(0)),
                 some_date(),
                 Some(some_date() - Duration::microseconds(130)),
+                None,
             ),
             "130"
         );
@@ -221,8 +246,40 @@ mod tests {
                 OutputFormat::Delta(Unit::Nanoseconds, Precision(3)),
                 some_date(),
                 Some(some_date() - Duration::nanoseconds(130)),
+                None,
             ),
             "130.000"
+        );
+    }
+
+    #[test]
+    fn output_elapsed() {
+        assert_eq!(
+            write(
+                OutputFormat::Elapsed(Unit::Seconds, Precision(0)),
+                some_date(),
+                None,
+                None
+            ),
+            "0"
+        );
+        assert_eq!(
+            write(
+                OutputFormat::Elapsed(Unit::Seconds, Precision(0)),
+                some_date(),
+                None,
+                Some(some_date()),
+            ),
+            "0"
+        );
+        assert_eq!(
+            write(
+                OutputFormat::Elapsed(Unit::Seconds, Precision(3)),
+                some_date(),
+                None,
+                Some(some_date() - Duration::milliseconds(10123)),
+            ),
+            "10.123"
         );
     }
 
